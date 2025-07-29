@@ -39,6 +39,7 @@ let bytesTransferredInBatch = 0;
 
 // Variable to track the file currently being received
 let currentReceivingFileId = null;
+let isFileSystemAccessApiSupported = false; // New: Track File System Access API support
 
 // Browser compatibility checks and polyfills
 function checkBrowserCompatibility() {
@@ -73,6 +74,14 @@ function checkBrowserCompatibility() {
     // Blob compatibility
     if (!window.Blob) {
         errors.push('Blob API is not supported');
+    }
+
+    // File System Access API compatibility (for saving large files directly)
+    if ('showSaveFilePicker' in window && 'WritableStream' in window) {
+        isFileSystemAccessApiSupported = true;
+        console.log('File System Access API is supported.');
+    } else {
+        console.warn('File System Access API is NOT fully supported. Large files will be buffered in memory.');
     }
     
     if (errors.length > 0) {
@@ -228,6 +237,9 @@ function updateTransferFileStatus(filename, type, status, fileUrl = null) {
             statusElement.innerHTML = `
                 <a href="${fileUrl}" download="${filename}" class="unified-download-btn" title="Download ${filename}">🢃</a>
             `;
+        } else if (status === 'saved') { // New status for files saved directly to disk
+            statusElement.innerHTML = `✅ Saved`;
+            statusElement.className = `unified-file-status ${status}`;
         } else {
             // Add icons for different statuses
             let statusIcon = '';
@@ -436,10 +448,12 @@ async function createOffer() {
 // --- DataChannel File Transfer Logic ---
 const receivedBuffers = {}; // Store file chunks for all files
 const receivedFileMetadata = {}; // Stores metadata for all files
+let currentWritableStream = null; // New: For File System Access API
+let currentFileHandle = null; // New: For File System Access API
 
 const LARGE_FILE_THRESHOLD_BYTES = 50 * 1024 * 1024; // 50 MB
 
-function setupDataChannelEvents(channel) {
+async function setupDataChannelEvents(channel) {
     channel.onopen = () => {
         console.log('DataChannel is open!');
         connectionStatusP.textContent = 'Connected! Ready to transfer files.';
@@ -468,7 +482,6 @@ function setupDataChannelEvents(channel) {
                 } else if (metadata.type === 'fileMetadata') {
                     const fileId = metadata.id;
                     receivedFileMetadata[fileId] = { ...metadata, receivedBytes: 0 };
-                    receivedBuffers[fileId] = []; // Always buffer in memory first
                     currentReceivingFileId = fileId; // Set the current receiving file ID
                     disableFileSelection(); // Disable file selection during transfer
                     
@@ -478,17 +491,45 @@ function setupDataChannelEvents(channel) {
                     
                     console.log('Receiving file:', metadata.name);
 
+                    // Try to use File System Access API for large files
+                    if (isFileSystemAccessApiSupported && metadata.size >= LARGE_FILE_THRESHOLD_BYTES) {
+                        try {
+                            currentFileHandle = await window.showSaveFilePicker({
+                                suggestedName: metadata.name,
+                                types: [{
+                                    description: 'File',
+                                    accept: { [metadata.fileType]: ['.' + metadata.name.split('.').pop()] }
+                                }],
+                            });
+                            currentWritableStream = await currentFileHandle.createWritable();
+                            console.log(`Using File System Access API for ${metadata.name}`);
+                        } catch (error) {
+                            console.warn('Failed to use File System Access API, falling back to memory buffering:', error);
+                            receivedBuffers[fileId] = []; // Fallback to memory
+                            currentWritableStream = null;
+                            currentFileHandle = null;
+                        }
+                    } else {
+                        receivedBuffers[fileId] = []; // Use memory buffering
+                    }
+
                 } else if (metadata.type === 'fileEnd') {
                     const fileId = metadata.id;
                     const fileMeta = receivedFileMetadata[fileId];
 
                     if (fileMeta) {
-                        console.log(`File ${fileMeta.name} received completely. Creating Blob...`);
-                        const blob = new Blob(receivedBuffers[fileId], { type: fileMeta.fileType });
-                        const url = URL.createObjectURL(blob);
-                        
-                        // Update transfer file status with download link
-                        updateTransferFileStatus(fileMeta.name, 'download', 'received', url);
+                        if (currentWritableStream) {
+                            await currentWritableStream.close();
+                            console.log(`File ${fileMeta.name} saved directly to disk.`);
+                            updateTransferFileStatus(fileMeta.name, 'download', 'saved'); // New status for saved files
+                        } else {
+                            console.log(`File ${fileMeta.name} received completely. Creating Blob...`);
+                            const blob = new Blob(receivedBuffers[fileId], { type: fileMeta.fileType });
+                            const url = URL.createObjectURL(blob);
+                            
+                            // Update transfer file status with download link
+                            updateTransferFileStatus(fileMeta.name, 'download', 'received', url);
+                        }
 
                         console.log(`File ${fileMeta.name} processed and added to list.`);
                         updateTransferProgress(0, 0); // Reset individual file progress
@@ -509,6 +550,8 @@ function setupDataChannelEvents(channel) {
                         console.warn(`Could not find metadata for fileId: ${fileId}.`);
                     }
                     currentReceivingFileId = null; // Clear the current receiving file ID
+                    currentWritableStream = null; // Clear the writable stream
+                    currentFileHandle = null; // Clear the file handle
                     enableFileSelection(); // Re-enable file selection after receiving file
                 }
             } catch (e) {
@@ -516,9 +559,16 @@ function setupDataChannelEvents(channel) {
             }
         } else {
             // This is a file chunk (ArrayBuffer)
-            if (currentReceivingFileId && receivedBuffers[currentReceivingFileId]) {
-                receivedBuffers[currentReceivingFileId].push(message);
+            if (currentReceivingFileId) {
                 const fileMeta = receivedFileMetadata[currentReceivingFileId];
+                if (currentWritableStream) {
+                    await currentWritableStream.write(message);
+                } else if (receivedBuffers[currentReceivingFileId]) {
+                    receivedBuffers[currentReceivingFileId].push(message);
+                } else {
+                    console.warn('Received file chunk but no active file metadata or buffer/stream found.');
+                    return;
+                }
                 fileMeta.receivedBytes += message.byteLength;
                 updateTransferProgress(fileMeta.receivedBytes, fileMeta.size, fileMeta.name);
                 console.log(`Received chunk for ${fileMeta.name}. Current size: ${fileMeta.receivedBytes}/${fileMeta.size}`);
@@ -532,10 +582,20 @@ function setupDataChannelEvents(channel) {
 
     channel.onclose = () => {
         console.log('DataChannel closed.');
+        if (currentWritableStream) {
+            currentWritableStream.abort(); // Abort if data channel closes unexpectedly
+            currentWritableStream = null;
+            currentFileHandle = null;
+        }
     };
 
     channel.onerror = (error) => {
         console.error('DataChannel error:', error);
+        if (currentWritableStream) {
+            currentWritableStream.abort(); // Abort if data channel errors
+            currentWritableStream = null;
+            currentFileHandle = null;
+        }
     };
 }
 

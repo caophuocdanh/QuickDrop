@@ -149,9 +149,11 @@ socket.on('disconnect', () => {
     connectionStatusP.className = 'connection-reconnecting';
     if (dataChannel) {
         dataChannel.close();
+        dataChannel = null; // Set to null after closing
     }
     if (peerConnection) {
         peerConnection.close();
+        peerConnection = null; // Set to null after closing
     }
     enableFileSelection(); // Re-enable if transfer was in progress
     attemptReconnection();
@@ -422,7 +424,19 @@ function createPeerConnection() {
             fileTransferDiv.classList.remove('hidden');
             enableFileSelection();
         } else if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
-            connectionStatusP.textContent = 'Connection lost. Please refresh.';
+            if (socket.connected) {
+                // Socket.IO is connected, but WebRTC is not. Try to re-establish WebRTC.
+                connectionStatusP.textContent = 'Peer connection lost. Re-establishing...';
+                connectionStatusP.className = 'connection-reconnecting';
+                // This might trigger createOffer/createAnswer again if needed
+                if (isInitiator) {
+                    createOffer();
+                }
+            } else {
+                // Both Socket.IO and WebRTC are disconnected. Socket.IO will handle reconnection.
+                connectionStatusP.textContent = 'Connection lost. Attempting to reconnect...';
+                connectionStatusP.className = 'connection-reconnecting';
+            }
             fileTransferDiv.classList.add('hidden');
             enableFileSelection();
         }

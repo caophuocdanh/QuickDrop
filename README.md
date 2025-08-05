@@ -59,10 +59,11 @@ npm start
 5. Chức năng chọn file bị vô hiệu hóa trong quá trình chuyển
 
 ### Nhận File
-1. File nhận được xuất hiện trong danh sách với biểu tượng ⬇️
-2. Trạng thái hiển thị "Đang nhận" với hoạt ảnh
-3. Khi hoàn thành, trạng thái hiển thị nút "Tải xuống"
-4. Nhấp để tải file về máy
+1. Ngay khi người gửi bắt đầu chuyển, một hộp thoại "Lưu File" sẽ xuất hiện trên các trình duyệt hỗ trợ (Chrome, Edge). Hãy chọn vị trí để lưu file.
+2. File sẽ được ghi trực tiếp vào vị trí bạn đã chọn trong quá trình nhận.
+3. File nhận được xuất hiện trong danh sách với biểu tượng ⬇️ và trạng thái "Đang nhận".
+4. Khi hoàn thành, trạng thái sẽ cập nhật thành "Đã lưu" (Saved), cho biết file đã nằm an toàn trên ổ đĩa của bạn.
+5. Trên các trình duyệt khác, file sẽ được đệm trong bộ nhớ và một nút "Tải xuống" sẽ xuất hiện khi nhận xong.
 
 ### Giao Diện Danh Sách Chuyển File
 Danh sách thống nhất hiển thị:
@@ -75,7 +76,8 @@ Danh sách thống nhất hiển thị:
 - **Đang gửi**: File đang được upload (màu vàng có hoạt ảnh)
 - **Đã gửi**: File upload thành công (màu xanh lá)
 - **Đang nhận**: File đang được download (màu xanh dương có hoạt ảnh)  
-- **Đã nhận**: File sẵn sàng với nút tải xuống (màu xanh lá)
+- **Đã lưu (Saved)**: File đã được lưu trực tiếp vào ổ đĩa (màu xanh lá).
+- **Đã nhận (Received)**: File sẵn sàng với nút tải xuống (trên trình duyệt không hỗ trợ lưu trực tiếp).
 
 ### Phím Tắt
 - **Ctrl+O**: Mở hộp thoại chọn file
@@ -85,10 +87,10 @@ Danh sách thống nhất hiển thị:
 ## 🔧 Chi Tiết Kỹ Thuật
 
 ### Tương Thích Trình Duyệt
-- **Chrome**: 56+
-- **Firefox**: 44+
-- **Safari**: 11+
-- **Edge**: 79+
+- **Chrome**: 86+ (Để có trải nghiệm tốt nhất với File System Access API)
+- **Firefox**: 44+ (Sử dụng cơ chế đệm bộ nhớ)
+- **Safari**: 11+ (Sử dụng cơ chế đệm bộ nhớ)
+- **Edge**: 86+ (Để có trải nghiệm tốt nhất với File System Access API)
 
 ### Kiến Trúc Hệ Thống
 ```
@@ -117,7 +119,7 @@ Danh sách thống nhất hiển thị:
 - **Chỉ một file**: Một file mỗi phiên chuyển
 - **Kích thước chunk**: 16KB để tối ưu hiệu suất
 - **Kiểm soát backpressure**: Ngăn chặn tràn bộ đệm
-- **Không giới hạn kích thước file**: Phụ thuộc vào bộ nhớ trình duyệt
+- **Không giới hạn kích thước file**: Trên các trình duyệt hỗ trợ File System Access API (Chrome, Edge), kích thước file về lý thuyết là không giới hạn. Trên các trình duyệt khác, kích thước bị giới hạn bởi bộ nhớ RAM của thiết bị.
 
 ## 🛠️ Phát Triển & Triển Khai
 
@@ -134,12 +136,11 @@ QuickDrop/
 ```
 
 ### Công Nghệ Chính
-- **WebRTC**: Giao tiếp peer-to-peer với mã hóa tự động
-- **Socket.IO**: Server signaling cho thiết lập kết nối
-- **Express.js**: Web server nhẹ
-- **File System Access API**: Xử lý file lớn
-- **ArrayBuffer**: Xử lý dữ liệu nhị phân
-- **Blob API**: Tạo và xử lý file objects
+- **WebRTC**: Giao tiếp peer-to-peer với mã hóa tự động.
+- **File System Access API**: Công nghệ chủ chốt cho phép ghi file trực tiếp xuống đĩa, loại bỏ giới hạn về kích thước file và ngăn chặn treo giao diện.
+- **Socket.IO**: Server signaling cho thiết lập kết nối.
+- **Express.js**: Web server nhẹ.
+- **ArrayBuffer & Blob API**: Xử lý dữ liệu nhị phân và làm phương án dự phòng trên các trình duyệt cũ.
 
 ### Scripts Có Sẵn
 ```powershell
@@ -177,7 +178,7 @@ npm run test-connection
 ## 🐛 Xử Lý Sự Cố
 
 ### Vấn Đề Kết Nối
-- **Kiểm tra tương thích trình duyệt**: Đảm bảo Chrome 56+, Firefox 44+, etc.
+- **Kiểm tra tương thích trình duyệt**: Đảm bảo Chrome 86+, Edge 86+ để có hiệu suất tốt nhất.
 - **Cùng phòng**: Đảm bảo cả hai người dùng trong cùng mã phòng
 - **Refresh khi thất bại**: Làm mới trang nếu kết nối thất bại
 - **Cài đặt mạng/firewall**: Kiểm tra các cài đặt chặn WebRTC
@@ -186,7 +187,7 @@ npm run test-connection
 ### Vấn Đề Chuyển File
 - **Chỉ chọn một file**: Hệ thống chỉ hỗ trợ một file mỗi lần
 - **Đợi trạng thái kết nối**: Đợi "Đã kết nối!" trước khi chuyển
-- **File lớn**: File lớn có thể cần thao tác lưu thủ công
+- **File lớn**: Trên trình duyệt không hỗ trợ lưu trực tiếp, file lớn có thể gây treo máy.
 - **Dung lượng**: Kiểm tra dung lượng trống trên thiết bị nhận
 - **Timeout**: Kết nối có thể timeout với file rất lớn
 
@@ -200,15 +201,16 @@ Mở Developer Tools (F12) để xem console logs chi tiết:
 ## 📊 Hiệu Suất
 
 ### Tối Ưu Hóa
-- **Chunk size**: 16KB tối ưu cho tốc độ và ổn định
-- **Backpressure handling**: Ngăn buffer overflow
-- **Memory management**: Efficient ArrayBuffer usage
+- **Ghi file trực tiếp**: Sử dụng File System Access API để ghi thẳng xuống đĩa, giảm thiểu sử dụng RAM và CPU.
+- **Chunk size**: 16KB tối ưu cho tốc độ và ổn định.
+- **Backpressure handling**: Ngăn buffer overflow.
+- **Memory management**: Sử dụng bộ nhớ hiệu quả, đặc biệt trên các trình duyệt không hỗ trợ ghi trực tiếp.
 - **Progress updates**: Throttled để tránh UI lag
 
 ### Benchmark
 - **LAN**: ~100-1000 Mbps (phụ thuộc hardware)
 - **Internet**: Phụ thuộc bandwidth và latency
-- **File size**: Không giới hạn lý thuyết (giới hạn bởi RAM)
+- **File size**: Về lý thuyết không giới hạn trên Chrome/Edge. Giới hạn bởi RAM trên các trình duyệt khác.
 
 ## 🔮 Tính Năng Tương Lai
 

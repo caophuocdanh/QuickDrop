@@ -114,8 +114,17 @@ if (!checkBrowserCompatibility()) {
 
 const configuration = {
     iceServers: [
+        // Public STUN servers (free)
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
+        
+        // Add your TURN server configuration here
+        // Replace with your actual TURN server details
+        {
+            urls: 'YOUR_TURN_SERVER_URL', // e.g., 'turn:your-turn-server.com:3478'
+            username: 'YOUR_USERNAME',
+            credential: 'YOUR_CREDENTIAL'
+        }
     ]
 };
 
@@ -149,9 +158,11 @@ socket.on('disconnect', () => {
     connectionStatusP.className = 'connection-reconnecting';
     if (dataChannel) {
         dataChannel.close();
+        dataChannel = null; // Set to null after closing
     }
     if (peerConnection) {
         peerConnection.close();
+        peerConnection = null; // Set to null after closing
     }
     enableFileSelection(); // Re-enable if transfer was in progress
     attemptReconnection();
@@ -422,7 +433,19 @@ function createPeerConnection() {
             fileTransferDiv.classList.remove('hidden');
             enableFileSelection();
         } else if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
-            connectionStatusP.textContent = 'Connection lost. Please refresh.';
+            if (socket.connected) {
+                // Socket.IO is connected, but WebRTC is not. Try to re-establish WebRTC.
+                connectionStatusP.textContent = 'Peer connection lost. Re-establishing...';
+                connectionStatusP.className = 'connection-reconnecting';
+                // This might trigger createOffer/createAnswer again if needed
+                if (isInitiator) {
+                    createOffer();
+                }
+            } else {
+                // Both Socket.IO and WebRTC are disconnected. Socket.IO will handle reconnection.
+                connectionStatusP.textContent = 'Connection lost. Attempting to reconnect...';
+                connectionStatusP.className = 'connection-reconnecting';
+            }
             fileTransferDiv.classList.add('hidden');
             enableFileSelection();
         }
@@ -450,8 +473,6 @@ const receivedBuffers = {}; // Store file chunks for all files
 const receivedFileMetadata = {}; // Stores metadata for all files
 let currentWritableStream = null; // New: For File System Access API
 let currentFileHandle = null; // New: For File System Access API
-
-const LARGE_FILE_THRESHOLD_BYTES = 50 * 1024 * 1024; // 50 MB
 
 async function setupDataChannelEvents(channel) {
     channel.onopen = () => {
@@ -491,10 +512,10 @@ async function setupDataChannelEvents(channel) {
                     
                     console.log('Receiving file:', metadata.name);
 
-                    // Try to use File System Access API for large files
-                    if (isFileSystemAccessApiSupported && metadata.size >= LARGE_FILE_THRESHOLD_BYTES) {
+                    // Always try to use File System Access API if supported, regardless of file size
+                    if (isFileSystemAccessApiSupported) {
                         try {
-                            currentFileHandle = await window.showSaveFilePicker({
+                            currentFileHandle = await window.showSaveFileFilePicker({
                                 suggestedName: metadata.name,
                                 types: [{
                                     description: 'File',
@@ -510,6 +531,8 @@ async function setupDataChannelEvents(channel) {
                             currentFileHandle = null;
                         }
                     } else {
+                        // Fallback for browsers that don't support the API
+                        console.warn('File System Access API not supported, falling back to memory buffering.');
                         receivedBuffers[fileId] = []; // Use memory buffering
                     }
 

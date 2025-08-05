@@ -57,7 +57,9 @@ io.on('connection', (socket) => {
     // Handle reconnection
     socket.on('reconnectToRoom', (roomId) => {
         const room = io.sockets.adapter.rooms.get(roomId);
-        if (room && room.size < 2) {
+        // Allow reconnection if room exists and has less than 2 participants,
+        // or if the room exists and the current socket is already in it (reconnecting to existing session)
+        if (room && (room.size < 2 || room.has(socket.id))) {
             socket.join(roomId);
             console.log(`User ${socket.id} reconnected to room: ${roomId}`);
             socket.emit('reconnectedToRoom', roomId);
